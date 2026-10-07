@@ -1,0 +1,95 @@
+# Comments on each PR with the release merging it would make, and checks that
+# its title is a Conventional Commit. A squash merge makes the title and
+# description the commit on main; a merge or rebase brings the PR's own
+# commits; the comment covers both (see .github/scripts/release-preview.mjs). If the title isn't
+# conventional, the comment explains the types and the check fails. The check
+# isn't required, so such a PR can still merge.
+name: pr title
+
+on:
+  # _target so the comment can be posted on PRs from forks too. Safe here: no
+  # code from the PR is checked out or run.
+  pull_request_target:
+    # Only merges to main release anything.
+    branches: [main]
+    # synchronize: new commits change what a merge or rebase releases.
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+# A newer run for the PR replaces an older one, so an older preview can't be
+# posted last. Runs the job skips get a group of their own, so they don't
+# cancel one that matters; the condition must match the job's `if`.
+concurrency:
+  group: ${{ (github.event.action != 'edited' || github.event.changes.title || github.event.changes.body || github.event.changes.base) && format('pr-title-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  title:
+    name: conventional title
+    # Only edits to the title, description or base branch change the preview.
+    # Keep in step with the concurrency group above.
+    if: github.event.action != 'edited' || github.event.changes.title || github.event.changes.body || github.event.changes.base
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        id: lint
+        # The comment is written either way; the last step fails the job.
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      # main's code, not the PR's: pull_request_target checks out the base.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Tags, for the last release.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Preview the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+          TITLE_OK: ${{ steps.lint.outcome == 'success' }}
+          COMMITS: ${{ runner.temp }}/commits.jsonl
+          COMMENT: ${{ runner.temp }}/comment.md
+        run: |
+          # The semantic-release-action, semantic-release and preset that
+          # release.yml uses, read from main's copy so they're set only there.
+          r=.github/workflows/release.yml
+          action=$(yq '[.jobs[].steps[] | select(.uses == "cycjimmy/semantic-release-action@*") | .uses] | unique | .[]' "$r")
+          sr=$(yq '.env.SEMANTIC_RELEASE' "$r")
+          preset=$(yq '.env.SEMANTIC_RELEASE_PLUGINS | split("\n") | .[] | select(test("^conventional-changelog-conventionalcommits@"))' "$r")
+          [[ $action =~ ^cycjimmy/semantic-release-action@[0-9a-f]{40}$ &&
+             $sr =~ ^[0-9]+\.[0-9]+\.[0-9]+$ &&
+             $preset =~ ^conventional-changelog-conventionalcommits@[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "::error file=$r::couldn't read one pinned semantic-release-action, SEMANTIC_RELEASE and conventionalcommits preset from $r (got '$action', '$sr', '$preset')"
+            exit 1
+          }
+          # Installs semantic-release the way the action does, from the
+          # action's lockfile, so the commit analyzer is the release's.
+          # --ignore-scripts: this job can write to PRs, so no package gets to
+          # run code on install.
+          for f in package.json package-lock.json; do
+            curl -fsSL -o "$f" "https://raw.githubusercontent.com/${action/@//}/$f"
+          done
+          npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+          npm install --ignore-scripts --no-audit --no-fund \
+            "semantic-release@$sr" "$preset" yaml@2.9.1
+          # Hashes too, so the analyzer can match reverts.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" \
+            --jq '.[] | {hash: .sha, message: .commit.message} | tojson' > "$COMMITS"
+          node .github/scripts/release-preview.mjs
+      - uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: pr-title
+          path: ${{ runner.temp }}/comment.md
+      - name: Fail if the title isn't conventional
+        if: steps.lint.outcome == 'failure'
+        run: |
+          echo "::error::The PR title isn't a Conventional Commit; the comment on the PR explains the types."
+          exit 1

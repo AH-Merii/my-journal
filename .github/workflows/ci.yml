@@ -1,0 +1,21 @@
+# Builds and tests every open pull request, on each push to it. PR builds keep
+# the placeholder version in src/main.bend; release.yml builds with the real
+# one.
+name: ci
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to the PR cancels the build of the one before.
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: ./.github/workflows/build.yml
+    with:
+      version: 0.0.0-dev

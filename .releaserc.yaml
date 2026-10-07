@@ -1,0 +1,22 @@
+# semantic-release settings, used by .github/workflows/release.yml. The next
+# version follows the Conventional Commits on main since the last v* tag, by
+# the preset's default rules: feat → minor; fix and perf → patch; `!` or a
+# BREAKING CHANGE footer → major; anything else, including commits that aren't
+# conventional, → no release. Tag v0.0.0 marks the start, so the first release
+# is 0.1.0 rather than semantic-release's usual 1.0.0.
+branches: [main]
+plugins:
+  - - "@semantic-release/commit-analyzer"
+    - preset: conventionalcommits
+  - - "@semantic-release/release-notes-generator"
+    - preset: conventionalcommits
+  # release.yml sets BUILT to the version the binaries were built with when
+  # publishing; this stops the release before tagging if semantic-release now
+  # wants another, e.g. because a tag was pushed during the build.
+  - - "@semantic-release/exec"
+    - verifyReleaseCmd: >-
+        test -z "$BUILT" || test "$BUILT" = "${nextRelease.version}"
+        || { echo "built v$BUILT, but the release is v${nextRelease.version}" >&2; exit 1; }
+  # Publishes the GitHub release with what release.yml put in dist/.
+  - - "@semantic-release/github"
+    - assets: dist/*

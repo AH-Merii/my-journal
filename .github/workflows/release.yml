@@ -1,0 +1,111 @@
+# On each merge to main, semantic-release works out the next version (see
+# .releaserc.yaml). If the commits call for one, mj is built at that version,
+# and semantic-release tags the commit and publishes a GitHub release with the
+# binaries and their checksums, which install.sh downloads.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# For both semantic-release steps, so the dry run and the release use the same
+# code. pr-title.yml's preview reads these and the action's pin from here.
+env:
+  SEMANTIC_RELEASE: 25.0.9
+  SEMANTIC_RELEASE_PLUGINS: |
+    conventional-changelog-conventionalcommits@10.4.1
+    @semantic-release/exec@7.1.0
+
+# One release at a time, so two quick merges can't both claim a version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: next version
+    runs-on: ubuntu-24.04
+    permissions:
+      # Even a dry run checks that it could push the tag.
+      contents: write
+    outputs:
+      # Empty when there's nothing to release.
+      version: ${{ steps.next.outputs.new_release_version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # All history and tags: the version comes from commits since the
+          # last v* tag.
+          fetch-depth: 0
+          persist-credentials: false
+      # With no tag, semantic-release would make the first release 1.0.0.
+      - name: Check there's a tag to count from
+        run: |
+          # Release tags only, as semantic-release counts them: v1.2.3, not
+          # v1.2.3-rc.1 or vinit.
+          git tag --merged HEAD --list 'v*' | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(\+[0-9A-Za-z.-]+)?$' || {
+            echo "::error::main has no v* tag; tag main's first commit v0.0.0 so the first release is 0.1.0, not 1.0.0"
+            exit 1
+          }
+      - uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        id: next
+        with:
+          semantic_version: ${{ env.SEMANTIC_RELEASE }}
+          extra_plugins: ${{ env.SEMANTIC_RELEASE_PLUGINS }}
+          dry_run: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  build:
+    needs: version
+    if: needs.version.outputs.version != ''
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  publish:
+    name: publish release
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      # semantic-release comments on the PRs and issues a release includes.
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mj-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum mj-*.tar.gz > checksums.txt
+      # Same commits and tags as the dry run, so normally the same version.
+      # BUILT makes semantic-release stop before tagging if not (see
+      # .releaserc.yaml).
+      - uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        id: publish
+        with:
+          semantic_version: ${{ env.SEMANTIC_RELEASE }}
+          extra_plugins: ${{ env.SEMANTIC_RELEASE_PLUGINS }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BUILT: ${{ needs.version.outputs.version }}
+      # Nothing published means another merge moved main during the build:
+      # semantic-release skips a branch that's behind, and the run for that
+      # merge releases these commits too. Fail so the wasted build shows.
+      - name: Check something was published
+        if: steps.publish.outputs.new_release_version == ''
+        env:
+          BUILT: ${{ needs.version.outputs.version }}
+        run: |
+          echo "::error::nothing was published: main moved during the build, and the next run releases v$BUILT's commits"
+          exit 1

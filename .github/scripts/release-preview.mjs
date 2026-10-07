@@ -6,9 +6,9 @@
 // .releaserc.yaml.
 //
 // Reads TITLE, BODY (the PR description), TITLE_OK ("true" if the title is
-// conventional) and COMMITS (a file with one JSON-encoded commit message per
-// line), writes the comment to the file named in COMMENT, and runs in a
-// checkout of main.
+// conventional) and COMMITS (a file with one JSON {hash, message} per line,
+// one per PR commit), writes the comment to the file named in COMMENT, and
+// runs in a checkout of main.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { analyzeCommits } from "@semantic-release/commit-analyzer";
@@ -23,12 +23,10 @@ const { plugins } = parse(readFileSync(".releaserc.yaml", "utf8"));
 const entry = plugins.find((p) => (Array.isArray(p) ? p[0] : p) === analyzer);
 const options = Array.isArray(entry) ? entry[1] : {};
 
-const bump = (messages) =>
-  analyzeCommits(options, {
-    cwd: process.cwd(),
-    commits: messages.map((message) => ({ hash: "", message })),
-    logger: { log() {} },
-  });
+// Commits as {hash, message}, newest first, as semantic-release lists them:
+// the analyzer then drops a commit together with a later revert of it.
+const bump = (commits) =>
+  analyzeCommits(options, { cwd: process.cwd(), commits, logger: { log() {} } });
 
 // semantic-release's last release: the highest v<version> tag on main. The
 // tag is kept as named, since build metadata such as +build.1 isn't part of
@@ -42,15 +40,13 @@ const last = execFileSync("git", ["tag", "--merged", "HEAD", "--list", "v*"], { 
 // Commits on main since then, which the next release includes whatever this
 // PR brings.
 const range = last ? [`${last.tag}..HEAD`] : ["HEAD"];
-const unreleased = execFileSync("git", ["log", "--format=%B%x00", ...range], { encoding: "utf8" })
+const unreleased = execFileSync("git", ["log", "-z", "--format=%H%n%B", ...range], { encoding: "utf8" })
   .split("\0")
-  .map((message) => message.trim())
-  .filter(Boolean);
-
-// The analyzer's types, lowest first; a set of commits releases the highest
-// of its commits' types.
-const types = [null, "patch", "minor", "major"];
-const higher = (a, b) => types[Math.max(types.indexOf(a), types.indexOf(b))];
+  .filter(Boolean)
+  .map((entry) => {
+    const newline = entry.indexOf("\n");
+    return { hash: entry.slice(0, newline), message: entry.slice(newline + 1).trim() };
+  });
 
 const release = (type) => {
   if (!type) return "nothing";
@@ -58,13 +54,18 @@ const release = (type) => {
   return `**v${semver.inc(last.version, type)}**, a ${type} bump from ${last.tag}`;
 };
 
+// GitHub lists a PR's commits oldest first.
 const prCommits = readFileSync(COMMITS, "utf8")
   .split("\n")
   .filter(Boolean)
-  .map((line) => JSON.parse(line));
+  .map((line) => JSON.parse(line))
+  .reverse();
+// Analyzed together with main's unreleased commits, which the PR's can
+// revert. The squash commit doesn't exist yet, so has no hash.
+const squashCommit = { hash: "", message: BODY ? `${TITLE}\n\n${BODY}` : TITLE };
+const squash = release(await bump([squashCommit, ...unreleased]));
+const commits = release(await bump([...prCommits, ...unreleased]));
 const base = await bump(unreleased);
-const squash = release(higher(base, await bump([BODY ? `${TITLE}\n\n${BODY}` : TITLE])));
-const commits = release(higher(base, await bump(prCommits)));
 
 let comment = `Going by [Conventional Commits](${cc}), merging this now releases`;
 if (squash === commits) {

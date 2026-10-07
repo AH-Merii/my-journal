@@ -78,8 +78,9 @@ jobs:
           npm ci --omit=dev --ignore-scripts --no-audit --no-fund
           npm install --ignore-scripts --no-audit --no-fund \
             "semantic-release@$sr" "$preset" yaml@2.9.1
+          # Hashes too, so the analyzer can match reverts.
           gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" \
-            --jq '.[].commit.message | @json' > "$COMMITS"
+            --jq '.[] | {hash: .sha, message: .commit.message} | tojson' > "$COMMITS"
           node .github/scripts/release-preview.mjs
       - uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:

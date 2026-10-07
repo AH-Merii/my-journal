@@ -1,7 +1,8 @@
 #!/bin/sh
 # Installs mj, the my-journal command, from a GitHub release:
 #   curl -fsSL https://raw.githubusercontent.com/AH-Merii/my-journal/main/install.sh | sh
-# Set MJ_VERSION (e.g. v0.1.0) to install that version instead of the latest.
+# Set MJ_VERSION (e.g. v0.1.0 or 0.1.0) to install that version instead of the
+# latest.
 #
 # The binary goes in ~/.local/bin, where the XDG Base Directory spec puts
 # user executables.
@@ -34,11 +35,22 @@ detect_arch() {
   esac
 }
 
-# The URL the release files are under: the latest release, or MJ_VERSION.
-release_url() {
-  case "${MJ_VERSION:-latest}" in
-    latest) echo "https://github.com/$REPO/releases/latest/download" ;;
-    *) echo "https://github.com/$REPO/releases/download/$MJ_VERSION" ;;
+# The release tag to install: MJ_VERSION, with or without its leading v, or
+# the latest release's. The latest is looked up once, so the tarball and
+# checksums.txt can't come from two releases if one is published in between.
+release_tag() {
+  if [ -n "${MJ_VERSION:-}" ]; then
+    echo "v${MJ_VERSION#v}"
+    return
+  fi
+  # releases/latest redirects to releases/tag/<tag>, or to releases if
+  # there are none.
+  latest=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+    "https://github.com/$REPO/releases/latest") \
+    || fail "could not look up the latest release of $REPO"
+  case "$latest" in
+    */releases/tag/*) echo "${latest##*/}" ;;
+    *) fail "$REPO has no releases yet" ;;
   esac
 }
 
@@ -63,11 +75,14 @@ verify() { # file
     || fail "$1 does not match its checksum"
 }
 
-# Unpacks mj from the tarball into DEST.
+# Unpacks mj from the tarball into DEST. Moving it from the temporary directory
+# may copy it across filesystems, so it lands next to the old mj first and is
+# then renamed over it: an interrupted install never leaves half an mj.
 unpack() { # file
   tar -xzf "$1" mj
   mkdir -p "$DEST"
-  mv mj "$DEST/mj"
+  mv mj "$DEST/.mj.new"
+  mv "$DEST/.mj.new" "$DEST/mj"
 }
 
 # Says how to run mj, or how to put DEST on the PATH first.
@@ -93,7 +108,8 @@ main() {
   os=$(detect_os)
   arch=$(detect_arch)
   file="mj-$os-$arch.tar.gz"
-  url=$(release_url)
+  tag=$(release_tag)
+  url="https://github.com/$REPO/releases/download/$tag"
 
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
@@ -101,7 +117,7 @@ main() {
   download "$url" "$file"
   verify "$file"
   unpack "$file"
-  echo "installed $DEST/mj"
+  echo "installed mj $tag in $DEST"
   path_hint
 }
 

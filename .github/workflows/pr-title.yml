@@ -1,16 +1,16 @@
-# Checks that a PR's title is a Conventional Commit, and comments on the PR.
-# A squash merge makes the title the commit on main, and that commit sets the
-# next version (see .releaserc.yaml). If the title is conventional, the
-# comment says what release merging would make; if not, the job fails and the
-# comment explains the types. The check isn't required, so such a PR can
-# still merge, but it then releases nothing.
+# Comments on each PR with the release merging it would make, and checks that
+# its title is a Conventional Commit. A squash merge makes the title the commit
+# on main; a merge or rebase brings the PR's own commits; the comment covers
+# both (see .github/scripts/release-preview.mjs). If the title isn't
+# conventional, the comment explains the types and the check fails. The check
+# isn't required, so such a PR can still merge.
 name: pr title
 
 on:
   # _target so the comment can be posted on PRs from forks too. Safe here: no
   # code from the PR is checked out or run.
   pull_request_target:
-    # synchronize too, so the preview catches up with releases since.
+    # synchronize: new commits change what a merge or rebase releases.
     types: [opened, edited, reopened, synchronize]
 
 permissions:
@@ -26,36 +26,10 @@ jobs:
     steps:
       - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         id: lint
+        # The comment is written either way; the last step fails the job.
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
-      # always(): the step above fails the job when the title is wrong.
-      - if: always() && steps.lint.outputs.error_message != null
-        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
-        with:
-          header: pr-title
-          message: |
-            This PR's title isn't a [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/). When squash-merged, the title becomes the commit on `main` that decides the next version, so please rename it to `<type>(<scope>): <summary>`, e.g. `fix(install): accept MJ_VERSION without a leading v`. Left as it is, merging releases nothing, even if it changes mj.
-
-            - `feat`: something new for users (minor)
-            - `fix`: a bug fix (patch)
-            - `perf`: faster or lighter, same behaviour (patch)
-            - `refactor`: restructured code, same behaviour (no release)
-            - `docs`: documentation only (no release)
-            - `test`: tests only (no release)
-            - `build`: build setup or dependencies, e.g. `mise.toml` (no release)
-            - `ci`: workflows and CI scripts (no release)
-            - `chore`: other upkeep (no release)
-            - `style`: formatting only (no release)
-            - `revert`: undoes an earlier change (no release)
-            - add `!` after the type, e.g. `feat!:`, when users must change how they use mj (major)
-
-            <details><summary>Check output</summary>
-
-            ```
-            ${{ steps.lint.outputs.error_message }}
-            ```
-
-            </details>
       # main's code, not the PR's: pull_request_target checks out the base.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,7 +38,11 @@ jobs:
           persist-credentials: false
       - name: Preview the release
         env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
           TITLE: ${{ github.event.pull_request.title }}
+          TITLE_OK: ${{ steps.lint.outcome == 'success' }}
+          COMMITS: ${{ runner.temp }}/commits.jsonl
           COMMENT: ${{ runner.temp }}/comment.md
         run: |
           # The analyzer and preset release.yml's semantic-release uses.
@@ -72,8 +50,15 @@ jobs:
             @semantic-release/commit-analyzer@13.0.1 \
             conventional-changelog-conventionalcommits@10.4.1 \
             semver@7.8.5 yaml@2.9.1
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" \
+            --jq '.[].commit.message | @json' > "$COMMITS"
           node .github/scripts/release-preview.mjs
       - uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
         with:
           header: pr-title
           path: ${{ runner.temp }}/comment.md
+      - name: Fail if the title isn't conventional
+        if: steps.lint.outcome == 'failure'
+        run: |
+          echo "::error::The PR title isn't a Conventional Commit; the comment on the PR explains the types."
+          exit 1

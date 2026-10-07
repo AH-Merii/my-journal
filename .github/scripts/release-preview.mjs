@@ -1,18 +1,21 @@
 // Writes the PR comment saying what release merging this PR would make. A
-// squash merge makes the PR title the commit on main; a merge or rebase brings
-// the PR's own commits. semantic-release's commit analyzer, with the options in
-// .releaserc.yaml, decides each case, from the last release tag on main.
+// squash merge makes the PR's title and description the commit on main (the
+// repo's squash settings); a merge or rebase brings the PR's own commits. The
+// release also counts main's commits since the last release tag. Each case is
+// decided by semantic-release's commit analyzer, with the options in
+// .releaserc.yaml.
 //
-// Reads TITLE, TITLE_OK ("true" if the title is conventional) and COMMITS (a
-// file with one JSON-encoded commit message per line), writes the comment to
-// the file named in COMMENT, and runs in a checkout of main.
+// Reads TITLE, BODY (the PR description), TITLE_OK ("true" if the title is
+// conventional) and COMMITS (a file with one JSON-encoded commit message per
+// line), writes the comment to the file named in COMMENT, and runs in a
+// checkout of main.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { analyzeCommits } from "@semantic-release/commit-analyzer";
 import semver from "semver";
 import { parse } from "yaml";
 
-const { TITLE, TITLE_OK, COMMITS, COMMENT } = process.env;
+const { TITLE, BODY, TITLE_OK, COMMITS, COMMENT } = process.env;
 const analyzer = "@semantic-release/commit-analyzer";
 const cc = "https://www.conventionalcommits.org/en/v1.0.0/";
 
@@ -34,16 +37,26 @@ const last = execFileSync("git", ["tag", "--merged", "HEAD", "--list", "v*"], { 
   .filter((version) => version && !semver.prerelease(version))
   .sort(semver.rcompare)[0];
 
+// Commits on main since then, which the next release includes whatever this
+// PR brings.
+const range = last ? [`v${last}..HEAD`] : ["HEAD"];
+const unreleased = execFileSync("git", ["log", "--format=%B%x00", ...range], { encoding: "utf8" })
+  .split("\0")
+  .map((message) => message.trim())
+  .filter(Boolean);
+
 const release = (type) => {
   if (!type) return "nothing";
   if (!last) return "**v1.0.0**, the first release";
   return `**v${semver.inc(last, type)}**, a ${type} bump from v${last}`;
 };
 
-const squash = release(await bump([TITLE]));
-const commits = release(
-  await bump(readFileSync(COMMITS, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line))),
-);
+const prCommits = readFileSync(COMMITS, "utf8")
+  .split("\n")
+  .filter(Boolean)
+  .map((line) => JSON.parse(line));
+const squash = release(await bump([...unreleased, BODY ? `${TITLE}\n\n${BODY}` : TITLE]));
+const commits = release(await bump([...unreleased, ...prCommits]));
 
 let comment = `Going by [Conventional Commits](${cc}), merging this now releases`;
 if (squash === commits) {
@@ -52,7 +65,10 @@ if (squash === commits) {
     comment += " If it changes what mj does for users, use `feat` or `fix`.";
   }
 } else {
-  comment += `:\n\n- squash merge, by the title: ${squash}\n- merge or rebase, by the commits: ${commits}`;
+  comment += `:\n\n- squash merge, by the title and description: ${squash}\n- merge or rebase, by the commits: ${commits}`;
+}
+if (await bump(unreleased)) {
+  comment += `\n\nThis counts commits already on main that haven't been released yet.`;
 }
 
 if (TITLE_OK !== "true") {

@@ -1,7 +1,7 @@
 # Comments on each PR with the release merging it would make, and checks that
-# its title is a Conventional Commit. A squash merge makes the title the commit
-# on main; a merge or rebase brings the PR's own commits; the comment covers
-# both (see .github/scripts/release-preview.mjs). If the title isn't
+# its title is a Conventional Commit. A squash merge makes the title and
+# description the commit on main; a merge or rebase brings the PR's own
+# commits; the comment covers both (see .github/scripts/release-preview.mjs). If the title isn't
 # conventional, the comment explains the types and the check fails. The check
 # isn't required, so such a PR can still merge.
 name: pr title
@@ -19,6 +19,8 @@ permissions:
 jobs:
   title:
     name: conventional title
+    # Edits to anything else, such as the base branch, change nothing here.
+    if: github.event.action != 'edited' || github.event.changes.title || github.event.changes.body
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -41,12 +43,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
           TITLE_OK: ${{ steps.lint.outcome == 'success' }}
           COMMITS: ${{ runner.temp }}/commits.jsonl
           COMMENT: ${{ runner.temp }}/comment.md
         run: |
           # The analyzer and preset release.yml's semantic-release uses.
-          npm install --no-save --no-package-lock --no-audit --no-fund \
+          # --ignore-scripts: this job can write to PRs, so no package gets to
+          # run code on install.
+          npm install --no-save --no-package-lock --no-audit --no-fund --ignore-scripts \
             @semantic-release/commit-analyzer@13.0.1 \
             conventional-changelog-conventionalcommits@10.4.1 \
             semver@7.8.5 yaml@2.9.1

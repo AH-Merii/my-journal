@@ -47,6 +47,11 @@ const unreleased = execFileSync("git", ["log", "--format=%B%x00", ...range], { e
   .map((message) => message.trim())
   .filter(Boolean);
 
+// The analyzer's types, lowest first; a set of commits releases the highest
+// of its commits' types.
+const types = [null, "patch", "minor", "major"];
+const higher = (a, b) => types[Math.max(types.indexOf(a), types.indexOf(b))];
+
 const release = (type) => {
   if (!type) return "nothing";
   if (!last) return "nothing until `v0.0.0` is tagged";
@@ -57,8 +62,9 @@ const prCommits = readFileSync(COMMITS, "utf8")
   .split("\n")
   .filter(Boolean)
   .map((line) => JSON.parse(line));
-const squash = release(await bump([...unreleased, BODY ? `${TITLE}\n\n${BODY}` : TITLE]));
-const commits = release(await bump([...unreleased, ...prCommits]));
+const base = await bump(unreleased);
+const squash = release(higher(base, await bump([BODY ? `${TITLE}\n\n${BODY}` : TITLE])));
+const commits = release(higher(base, await bump(prCommits)));
 
 let comment = `Going by [Conventional Commits](${cc}), merging this now releases`;
 if (squash === commits) {
@@ -69,7 +75,7 @@ if (squash === commits) {
 } else {
   comment += `:\n\n- squash merge, by the title and description: ${squash}\n- merge or rebase, by the commits: ${commits}`;
 }
-if (await bump(unreleased)) {
+if (base) {
   comment += `\n\nThis counts commits already on main that haven't been released yet.`;
 }
 if (!last) {

@@ -10,6 +10,8 @@ on:
   # _target so the comment can be posted on PRs from forks too. Safe here: no
   # code from the PR is checked out or run.
   pull_request_target:
+    # Only merges to main release anything.
+    branches: [main]
     # synchronize: new commits change what a merge or rebase releases.
     types: [opened, edited, reopened, synchronize]
 

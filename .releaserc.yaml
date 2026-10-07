@@ -1,0 +1,15 @@
+# semantic-release settings, used by .github/workflows/release.yml. The next
+# version follows the Conventional Commits on main since the last v* tag, by
+# the preset's default rules: feat → minor; fix and perf → patch; `!` or a
+# BREAKING CHANGE footer → major; anything else, including commits that aren't
+# conventional, → no release. Tag v0.0.0 marks the start, so the first release
+# is 0.1.0 rather than semantic-release's usual 1.0.0.
+branches: [main]
+plugins:
+  - - "@semantic-release/commit-analyzer"
+    - preset: conventionalcommits
+  - - "@semantic-release/release-notes-generator"
+    - preset: conventionalcommits
+  # Publishes the GitHub release with what release.yml put in dist/.
+  - - "@semantic-release/github"
+    - assets: dist/*

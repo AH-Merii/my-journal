@@ -1,9 +1,9 @@
 # Checks that a PR's title is a Conventional Commit. A squash merge makes the
 # title the commit on main, and that commit sets the next version (see
-# .github/scripts/next-version.sh). If the title isn't conventional, this
-# fails and leaves a comment explaining the types; fixing the title removes
-# the comment. The check isn't required, so such a PR can still merge, and
-# it then releases a minor version.
+# .releaserc.yaml). If the title isn't conventional, this fails and leaves a
+# comment explaining the types; fixing the title removes the comment. The
+# check isn't required, so such a PR can still merge, but it then releases
+# nothing.
 name: pr title
 
 on:
@@ -32,7 +32,7 @@ jobs:
         with:
           header: pr-title
           message: |
-            This PR's title isn't a [Conventional Commit](https://www.conventionalcommits.org). When squash-merged, the title becomes the commit on `main` that decides the next version, so please rename it to `<type>(<scope>): <summary>`, e.g. `fix(install): accept MJ_VERSION without a leading v`. Left as it is, merging releases a minor version.
+            This PR's title isn't a [Conventional Commit](https://www.conventionalcommits.org). When squash-merged, the title becomes the commit on `main` that decides the next version, so please rename it to `<type>(<scope>): <summary>`, e.g. `fix(install): accept MJ_VERSION without a leading v`. Left as it is, merging releases nothing, even if it changes mj.
 
             - `feat`: something new for users (minor)
             - `fix`: a bug fix (patch)

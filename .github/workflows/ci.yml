@@ -1,5 +1,6 @@
-# Builds and tests every open pull request, on each push to it. The run's
-# summary shows the version merging it would release.
+# Builds and tests every open pull request, on each push to it. PR builds keep
+# the placeholder version in src/main.bend; release.yml builds with the real
+# one.
 name: ci
 
 on:
@@ -11,3 +12,5 @@ permissions:
 jobs:
   ci:
     uses: ./.github/workflows/build.yml
+    with:
+      version: 0.0.0-dev

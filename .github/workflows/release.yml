@@ -1,7 +1,7 @@
-# On each merge to main, builds mj at the version its commits call for and,
-# unless no commit asks for a bump, tags v<version> on that commit and
-# publishes a GitHub release with the binaries and their checksums, which
-# install.sh downloads.
+# On each merge to main, semantic-release works out the next version (see
+# .releaserc.yaml). If the commits call for one, mj is built at that version,
+# and semantic-release tags the commit and publishes a GitHub release with the
+# binaries and their checksums, which install.sh downloads.
 name: release
 
 on:
@@ -17,20 +17,52 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  version:
+    name: next version
+    runs-on: ubuntu-24.04
+    permissions:
+      # Even a dry run checks that it could push the tag.
+      contents: write
+    outputs:
+      # Empty when there's nothing to release.
+      version: ${{ steps.next.outputs.new_release_version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # All history and tags: the version comes from commits since the
+          # last v* tag.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        id: next
+        with:
+          semantic_version: 25.0.9
+          extra_plugins: conventional-changelog-conventionalcommits@10.4.1
+          dry_run: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
   build:
+    needs: version
+    if: needs.version.outputs.version != ''
     uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
 
   publish:
     name: publish release
     needs: build
-    if: needs.build.outputs.bump != 'none'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      TAG: v${{ needs.build.outputs.version }}
+      # semantic-release comments on the PRs and issues a release includes.
+      issues: write
+      pull-requests: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: mj-*
@@ -39,8 +71,10 @@ jobs:
       - name: Checksums
         working-directory: dist
         run: sha256sum mj-*.tar.gz > checksums.txt
-      # Creates the tag on this commit too.
-      - name: Publish
-        run: |
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" --title "$TAG" --generate-notes dist/*
+      # Same commits and tags as the dry run, so the same version.
+      - uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        with:
+          semantic_version: 25.0.9
+          extra_plugins: conventional-changelog-conventionalcommits@10.4.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

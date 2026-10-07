@@ -1,8 +1,8 @@
-# journal: manages personal journal entries.
+# mj (my-journal): manages personal journal entries.
 #
-#   journal -h | --help      prints the help
-#   journal -v | --version   prints the version
-#   journal new              creates an entry and opens it in $EDITOR
+#   mj -h | --help      prints the help
+#   mj -v | --version   prints the version
+#   mj new              creates an entry and opens it in $EDITOR
 import Base
 
 # Help
@@ -11,7 +11,7 @@ import Base
 def version() -> String:
   "0.1.0"
 
-# The commands and the sentence describing each. journal's help lists them,
+# The commands and the sentence describing each. mj's help lists them,
 # and a command without its own help inherits its sentence (see help.of).
 def commands() -> List<(String & String)>:
   [("new", "create a new entry and open it in your editor")]
@@ -30,9 +30,9 @@ def help.rows(cmds: List<(String & String)>) -> List<&2, String>:
 
 def help() -> String:
   String.join([
-    "journal: manage your personal journal entries.",
+    "mj: manage your personal journal entries.",
     "",
-    "usage: journal <command> [options]",
+    "usage: mj <command> [options]",
     "",
     "commands:",
     String.join(help.rows(commands()), "\n"),
@@ -41,8 +41,8 @@ def help() -> String:
     help.row("-h, --help", "show this help"),
     help.row("-v, --version", "show the version"),
     "",
-    "Entries are stored in $XDG_DATA_HOME/journal/entries",
-    "(default: ~/.local/share/journal/entries)."
+    "Entries are stored in $XDG_DATA_HOME/my-journal/entries",
+    "(default: ~/.local/share/my-journal/entries)."
   ], "\n")
 
 def help.pick(found: Bool, about: String, next: String) -> String:
@@ -61,13 +61,13 @@ def help.about(+name: String, cmds: List<(String & String)>) -> String:
       help.pick(String.eq(n, name), about, help.about(name, rest))
 
 # The default help of a command, headed by the sentence it inherits from
-# journal's help.
+# mj's help.
 def help.of(name: String) -> String:
   +n = name
   String.join([
-    "journal " ++ n ++ ": " ++ help.about(n, commands()),
+    "mj " ++ n ++ ": " ++ help.about(n, commands()),
     "",
-    "usage: journal " ++ n,
+    "usage: mj " ++ n,
     "",
     "options:",
     help.row("-h, --help", "show this help")
@@ -87,13 +87,13 @@ def run.exit(ok: Bool, name: String, out: String, err: String) -> IO(String):
     case True{}:
       IO.pure(String, out)
     case False{}:
-      IO.die(String, 1, "journal: " ++ name ++ " failed: " ++ err)
+      IO.die(String, 1, "mj: " ++ name ++ " failed: " ++ err)
 
 def run.check(name: String,
   r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> IO(String):
   match r:
     case Fail{(code, msg)}:
-      IO.die(String, 1, "journal: " ++ name ++ ": " ++ msg)
+      IO.die(String, 1, "mj: " ++ name ++ ": " ++ msg)
     case Done{(code, (out, err))}:
       run.exit(U32.is_eq(code, 0), name, out, err)
 
@@ -118,7 +118,7 @@ def stamp.fmt(minute: Maybe<&2, U32>, day: String, hour: String,
   half: String) -> IO(String):
   match minute:
     case None{}:
-      IO.die(String, 1, "journal: could not read the minute from date")
+      IO.die(String, 1, "mj: could not read the minute from date")
     case Some{m}:
       IO.pure(String,
         day ++ "-" ++ hour ++ "." ++ U32.show(U32.div(m, 6)) ++ "-" ++ half)
@@ -128,7 +128,7 @@ def stamp.parse(parts: List<&2, String>) -> IO(String):
     case Con{day, Con{hour, Con{minute, Con{half, Nil{}}}}}:
       stamp.fmt(U32.read(minute), day, hour, half)
     case _:
-      IO.die(String, 1, "journal: unexpected output from date")
+      IO.die(String, 1, "mj: unexpected output from date")
 
 # The local time as "<Day>-<day>-<Month>-<year>-<hour.tenths>-<AM|PM>".
 def stamp() -> IO(String):
@@ -208,7 +208,7 @@ def editor() -> IO(String):
 # Process.run pipes the child's stdio, so the editor is handed the terminal
 # through /dev/tty. $1 is unquoted so an EDITOR like "code -w" works.
 def editor.open(editor: String, path: String) -> IO(String):
-  run("sh", ["-c", "exec $1 \"$2\" </dev/tty >/dev/tty 2>&1", "journal",
+  run("sh", ["-c", "exec $1 \"$2\" </dev/tty >/dev/tty 2>&1", "mj",
     editor, path], 4294967295)
 
 # XDG
@@ -239,7 +239,7 @@ def entries_dir() -> IO(String):
   do IO<String>:
     env : Result<&1, &1, U32 & String, String> <- IO.get_env("XDG_DATA_HOME")
     data : String <- data_home.pick(env)
-    return data ++ "/journal/entries"
+    return data ++ "/my-journal/entries"
 
 # Commands
 # ========
@@ -275,7 +275,7 @@ def args.none.if(is_h: Bool, +n: String, arg: String) -> IO(Unit):
     case True{}:
       IO.print(help.of(n))
     case False{}:
-      IO.die(Unit, 2, "journal " ++ n ++ ": unexpected argument '" ++ arg
+      IO.die(Unit, 2, "mj " ++ n ++ ": unexpected argument '" ++ arg
         ++ "'\n\n" ++ help.of(n))
 
 def new(args: List<String>) -> IO(Unit):
@@ -300,13 +300,13 @@ def command.if(is_h: Bool, is_v: Bool, is_new: Bool, +cmd: String,
     case False{}:
       match is_v:
         case True{}:
-          IO.print("journal " ++ version())
+          IO.print("mj " ++ version())
         case False{}:
           match is_new:
             case True{}:
               new(rest)
             case False{}:
-              IO.die(Unit, 2, "journal: unknown "
+              IO.die(Unit, 2, "mj: unknown "
                 ++ unknown.kind(String.starts_with(cmd, "-")) ++ " '" ++ cmd
                 ++ "'\n\n" ++ help())
 

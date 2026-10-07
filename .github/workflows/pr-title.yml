@@ -19,16 +19,18 @@ permissions:
   contents: read
 
 # A newer run for the PR replaces an older one, so an older preview can't be
-# posted last.
+# posted last. Runs the job skips get a group of their own, so they don't
+# cancel one that matters; the condition must match the job's `if`.
 concurrency:
-  group: pr-title-${{ github.event.pull_request.number }}
+  group: ${{ (github.event.action != 'edited' || github.event.changes.title || github.event.changes.body || github.event.changes.base) && format('pr-title-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: true
 
 jobs:
   title:
     name: conventional title
-    # Edits to anything else, such as the base branch, change nothing here.
-    if: github.event.action != 'edited' || github.event.changes.title || github.event.changes.body
+    # Only edits to the title, description or base branch change the preview.
+    # Keep in step with the concurrency group above.
+    if: github.event.action != 'edited' || github.event.changes.title || github.event.changes.body || github.event.changes.base
     runs-on: ubuntu-24.04
     permissions:
       contents: read

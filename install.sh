@@ -1,59 +1,109 @@
 #!/bin/sh
-# Installs my-journal (the mj command):
-#   curl -fsSL https://raw.githubusercontent.com/AH-Merii/my-journal/main/install.sh | sh
+# Installs mj, the my-journal command, from a GitHub release:
+#   curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | sh
+# Set MJ_VERSION (e.g. v0.1.0) to install that version instead of the latest.
 #
-# Compiles src/main.bend with Bend into ~/.local/bin, where the XDG
-# Base Directory spec puts user executables. Bend is only needed to compile,
-# not to run.
+# The binary goes in ~/.local/bin, where the XDG Base Directory spec puts
+# user executables.
 set -eu
 
-REPO="AH-Merii/my-journal"
+# The release workflow fills this in with the repo that published it.
+REPO=""
 DEST="$HOME/.local/bin"
-# Bend's update check writes ~/.bend, outside the XDG dirs; skip it.
-export BEND_NO_TELEMETRY=1
 
 fail() { printf 'mj: %s\n' "$*" >&2; exit 1; }
 
-command -v mise >/dev/null 2>&1 || command -v bend >/dev/null 2>&1 \
-  || fail "prerequisites not found. Install one of these, then rerun this script:
-  - Bend: https://github.com/bendlang/bend#get-started
-  - mise (installs Bend for you): https://mise.jdx.dev/getting-started.html"
+have() { command -v "$1" >/dev/null 2>&1; }
 
-command -v clang >/dev/null 2>&1 \
-  || fail "clang (14+) is required to compile; install it with your package manager"
+# linux or darwin, as named in the release files.
+detect_os() {
+  case "$(uname -s)" in
+    Linux) echo linux ;;
+    Darwin) echo darwin ;;
+    *) fail "no prebuilt binary for $(uname -s)" ;;
+  esac
+}
 
-# The source and its mise.toml: this checkout's, else downloaded.
-dir=$(cd "$(dirname "$0")" && pwd)
-if [ ! -f "$dir/src/main.bend" ] || [ ! -f "$dir/mise.toml" ]; then
-  dir=$(mktemp -d)
-  trap 'rm -rf "$dir"' EXIT
-  mkdir "$dir/src"
-  for f in mise.toml src/main.bend; do
-    curl -fsSL -o "$dir/$f" "https://raw.githubusercontent.com/$REPO/main/$f" \
-      || fail "could not download $f from github.com/$REPO"
+# x64 or arm64, as named in the release files.
+detect_arch() {
+  case "$(uname -m)" in
+    x86_64 | amd64) echo x64 ;;
+    aarch64 | arm64) echo arm64 ;;
+    *) fail "no prebuilt binary for $(uname -m)" ;;
+  esac
+}
+
+# The URL the release files are under: the latest release, or MJ_VERSION.
+release_url() {
+  case "${MJ_VERSION:-latest}" in
+    latest) echo "https://github.com/$REPO/releases/latest/download" ;;
+    *) echo "https://github.com/$REPO/releases/download/$MJ_VERSION" ;;
+  esac
+}
+
+# Downloads the binary's tarball and the release checksums into the
+# current directory.
+download() { # url file
+  for f in "$2" checksums.txt; do
+    curl -fsSL -o "$f" "$1/$f" || fail "could not download $1/$f"
   done
-fi
+}
 
-mkdir -p "$DEST"
-cd "$dir"
-# mise runs the Bend pinned in mise.toml, installing it if missing.
-if command -v mise >/dev/null 2>&1; then
-  mise exec github:bendlang/bend -- bend src/main.bend -o "$DEST/mj"
-else
-  bend src/main.bend -o "$DEST/mj"
-fi
-echo "installed $DEST/mj"
+# Checks file against its line in checksums.txt.
+verify() { # file
+  if have sha256sum; then
+    sha="sha256sum"
+  elif have shasum; then
+    sha="shasum -a 256"
+  else
+    fail "sha256sum or shasum is required to verify the download"
+  fi
+  grep " $1\$" checksums.txt | $sha -c - >/dev/null 2>&1 \
+    || fail "$1 does not match its checksum"
+}
 
-case ":$PATH:" in
-  *":$DEST:"*)
-    echo "run 'mj -h' to verify" ;;
-  *)
-    case "${SHELL##*/}" in
-      fish) add="fish_add_path $DEST" ;;
-      zsh)  add="echo 'export PATH=\"$DEST:\$PATH\"' >> ~/.zshrc" ;;
-      *)    add="echo 'export PATH=\"$DEST:\$PATH\"' >> ~/.bashrc" ;;
-    esac
-    echo "$DEST is not on your PATH; add it with:"
-    echo "  $add"
-    echo "then open a new shell and run 'mj -h' to verify" ;;
-esac
+# Unpacks mj from the tarball into DEST.
+unpack() { # file
+  tar -xzf "$1" mj
+  mkdir -p "$DEST"
+  mv mj "$DEST/mj"
+}
+
+# Says how to run mj, or how to put DEST on the PATH first.
+path_hint() {
+  case ":$PATH:" in
+    *":$DEST:"*)
+      echo "run 'mj -h' to verify"
+      return ;;
+  esac
+  shell=${SHELL:-}
+  case "${shell##*/}" in
+    fish) add="fish_add_path $DEST" ;;
+    zsh)  add="echo 'export PATH=\"$DEST:\$PATH\"' >> ~/.zshrc" ;;
+    *)    add="echo 'export PATH=\"$DEST:\$PATH\"' >> ~/.bashrc" ;;
+  esac
+  echo "$DEST is not on your PATH; add it with:"
+  echo "  $add"
+  echo "then open a new shell and run 'mj -h' to verify"
+}
+
+main() {
+  [ -n "$REPO" ] || fail "use the install.sh attached to a GitHub release"
+  # One substitution per line, so set -e catches each failing.
+  os=$(detect_os)
+  arch=$(detect_arch)
+  file="mj-$os-$arch.tar.gz"
+  url=$(release_url)
+
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  cd "$tmp"
+  download "$url" "$file"
+  verify "$file"
+  unpack "$file"
+  echo "installed $DEST/mj"
+  path_hint
+}
+
+# Called last, so a download of this script cut short runs nothing.
+main

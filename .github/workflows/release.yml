@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 # For both semantic-release steps, so the dry run and the release use the same
-# code. pr-title.yml's preview installs the same versions.
+# code. pr-title.yml's preview reads these and the action's pin from here.
 env:
   SEMANTIC_RELEASE: 25.0.9
   SEMANTIC_RELEASE_PLUGINS: |

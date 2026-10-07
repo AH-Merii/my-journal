@@ -40,18 +40,6 @@ jobs:
             echo "::error file=install.sh::set REPO=\"$GITHUB_REPOSITORY\" in install.sh"
             exit 1
           }
-      - name: Check the release preview installs what release.yml does
-        run: |
-          r=.github/workflows/release.yml p=.github/workflows/pr-title.yml
-          action=$(grep -o 'semantic-release-action@[0-9a-f]*' "$r" | sort -u)
-          sr=$(sed -n 's/^  SEMANTIC_RELEASE: //p' "$r")
-          preset=$(grep -o 'conventional-changelog-conventionalcommits@[0-9.]*' "$r")
-          for v in "${action%@*}/${action#*@}" "SEMANTIC_RELEASE: $sr" "PRESET: $preset"; do
-            grep -qF "$v" "$p" || {
-              echo "::error file=$p::$p must use $v, as release.yml does"
-              exit 1
-            }
-          done
       # Only in this checkout; the version is never committed.
       - name: Write the version into version()
         run: |

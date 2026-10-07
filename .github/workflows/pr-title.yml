@@ -55,22 +55,29 @@ jobs:
           TITLE_OK: ${{ steps.lint.outcome == 'success' }}
           COMMITS: ${{ runner.temp }}/commits.jsonl
           COMMENT: ${{ runner.temp }}/comment.md
-          # release.yml's semantic-release-action and the versions it's given
-          # there. CI fails if they differ from release.yml's.
-          ACTION: cycjimmy/semantic-release-action/b12c8f6015dc215fe37bc154d4ad456dd3833c90
-          SEMANTIC_RELEASE: 25.0.9
-          PRESET: conventional-changelog-conventionalcommits@10.4.1
         run: |
+          # The semantic-release-action, semantic-release and preset that
+          # release.yml uses, read from main's copy so they're set only there.
+          r=.github/workflows/release.yml
+          action=$(yq '[.jobs[].steps[] | select(.uses == "cycjimmy/semantic-release-action@*") | .uses] | unique | .[]' "$r")
+          sr=$(yq '.env.SEMANTIC_RELEASE' "$r")
+          preset=$(yq '.env.SEMANTIC_RELEASE_PLUGINS | split("\n") | .[] | select(test("^conventional-changelog-conventionalcommits@"))' "$r")
+          [[ $action =~ ^cycjimmy/semantic-release-action@[0-9a-f]{40}$ &&
+             $sr =~ ^[0-9]+\.[0-9]+\.[0-9]+$ &&
+             $preset =~ ^conventional-changelog-conventionalcommits@[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "::error file=$r::couldn't read one pinned semantic-release-action, SEMANTIC_RELEASE and conventionalcommits preset from $r (got '$action', '$sr', '$preset')"
+            exit 1
+          }
           # Installs semantic-release the way the action does, from the
           # action's lockfile, so the commit analyzer is the release's.
           # --ignore-scripts: this job can write to PRs, so no package gets to
           # run code on install.
           for f in package.json package-lock.json; do
-            curl -fsSL -o "$f" "https://raw.githubusercontent.com/$ACTION/$f"
+            curl -fsSL -o "$f" "https://raw.githubusercontent.com/${action/@//}/$f"
           done
           npm ci --omit=dev --ignore-scripts --no-audit --no-fund
           npm install --ignore-scripts --no-audit --no-fund \
-            "semantic-release@$SEMANTIC_RELEASE" "$PRESET" yaml@2.9.1
+            "semantic-release@$sr" "$preset" yaml@2.9.1
           gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/commits" \
             --jq '.[].commit.message | @json' > "$COMMITS"
           node .github/scripts/release-preview.mjs

@@ -33,6 +33,13 @@ jobs:
           # last v* tag.
           fetch-depth: 0
           persist-credentials: false
+      # With no tag, semantic-release would make the first release 1.0.0.
+      - name: Check there's a tag to count from
+        run: |
+          git tag --merged HEAD --list 'v*' | grep -q . || {
+            echo "::error::main has no v* tag; tag main's first commit v0.0.0 so the first release is 0.1.0, not 1.0.0"
+            exit 1
+          }
       - uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
         id: next
         with:

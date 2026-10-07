@@ -47,7 +47,7 @@ const unreleased = execFileSync("git", ["log", "--format=%B%x00", ...range], { e
 
 const release = (type) => {
   if (!type) return "nothing";
-  if (!last) return "**v1.0.0**, the first release";
+  if (!last) return "nothing until `v0.0.0` is tagged";
   return `**v${semver.inc(last, type)}**, a ${type} bump from v${last}`;
 };
 
@@ -69,6 +69,9 @@ if (squash === commits) {
 }
 if (await bump(unreleased)) {
   comment += `\n\nThis counts commits already on main that haven't been released yet.`;
+}
+if (!last) {
+  comment += `\n\nmain has no \`v*\` tag, so release.yml stops rather than release v1.0.0. Tag main's first commit \`v0.0.0\`.`;
 }
 
 if (TITLE_OK !== "true") {

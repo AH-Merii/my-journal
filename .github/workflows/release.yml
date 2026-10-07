@@ -11,6 +11,14 @@ on:
 permissions:
   contents: read
 
+# For both semantic-release steps, so the dry run and the release use the same
+# code. pr-title.yml's preview installs the same versions.
+env:
+  SEMANTIC_RELEASE: 25.0.9
+  SEMANTIC_RELEASE_PLUGINS: |
+    conventional-changelog-conventionalcommits@10.4.1
+    @semantic-release/exec@7.1.0
+
 # One release at a time, so two quick merges can't both claim a version.
 concurrency:
   group: release
@@ -43,10 +51,8 @@ jobs:
       - uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
         id: next
         with:
-          semantic_version: 25.0.9
-          extra_plugins: |
-            conventional-changelog-conventionalcommits@10.4.1
-            @semantic-release/exec@7.1.0
+          semantic_version: ${{ env.SEMANTIC_RELEASE }}
+          extra_plugins: ${{ env.SEMANTIC_RELEASE_PLUGINS }}
           dry_run: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -86,10 +92,8 @@ jobs:
       - uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
         id: publish
         with:
-          semantic_version: 25.0.9
-          extra_plugins: |
-            conventional-changelog-conventionalcommits@10.4.1
-            @semantic-release/exec@7.1.0
+          semantic_version: ${{ env.SEMANTIC_RELEASE }}
+          extra_plugins: ${{ env.SEMANTIC_RELEASE_PLUGINS }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           BUILT: ${{ needs.version.outputs.version }}

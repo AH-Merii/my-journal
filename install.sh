@@ -1,14 +1,15 @@
 #!/bin/sh
 # Installs mj, the my-journal command, from a GitHub release:
-#   curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/AH-Merii/my-journal/main/install.sh | sh
 # Set MJ_VERSION (e.g. v0.1.0) to install that version instead of the latest.
 #
 # The binary goes in ~/.local/bin, where the XDG Base Directory spec puts
 # user executables.
 set -eu
 
-# The release workflow fills this in with the repo that published it.
-REPO=""
+# CI fails until this matches the repo it runs in, so a rename or fork
+# can't publish an installer pointing elsewhere.
+REPO="AH-Merii/my-journal"
 DEST="$HOME/.local/bin"
 
 fail() { printf 'mj: %s\n' "$*" >&2; exit 1; }
@@ -88,7 +89,6 @@ path_hint() {
 }
 
 main() {
-  [ -n "$REPO" ] || fail "use the install.sh attached to a GitHub release"
   # One substitution per line, so set -e catches each failing.
   os=$(detect_os)
   arch=$(detect_arch)

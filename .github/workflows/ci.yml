@@ -1,5 +1,7 @@
-# Builds mj on every push and pull request. A pushed v* tag also publishes a
-# GitHub release with the binaries, their checksums and install.sh.
+# Builds mj on every push and pull request. A push to main whose version()
+# has no release yet also tags v<version> and publishes a GitHub release with
+# the binaries and their checksums, which install.sh downloads. So releasing
+# is merging a PR that bumps version() in src/main.bend.
 #
 # Bend emits one portable C file, which each platform then compiles with
 # clang, so Bend is only installed once.
@@ -8,7 +10,6 @@ name: ci
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -22,6 +23,8 @@ jobs:
   emit:
     name: check and emit C
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -29,8 +32,20 @@ jobs:
       # Installs the Bend version pinned in mise.toml.
       - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
       - run: bend src/main.bend --check-only
+      # `--` hands --version to mj rather than to bend.
+      - name: Read the version
+        id: version
+        run: |
+          v=$(bend src/main.bend -- --version)
+          echo "version=${v#mj }" >> "$GITHUB_OUTPUT"
       - run: bend src/main.bend -o mj.c
       - run: shellcheck install.sh
+      - name: Check install.sh downloads from this repo
+        run: |
+          grep -qx "REPO=\"$GITHUB_REPOSITORY\"" install.sh || {
+            echo "::error file=install.sh::set REPO=\"$GITHUB_REPOSITORY\" in install.sh"
+            exit 1
+          }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mj.c
@@ -70,10 +85,6 @@ jobs:
           ./mj -v
           status=0; ./mj bogus 2>/dev/null || status=$?
           test "$status" -eq 2
-          case "$GITHUB_REF" in
-            refs/tags/v*) test "$(./mj -v)" = "mj ${GITHUB_REF_NAME#v}" \
-              || { echo "::error::mj -v does not match the tag $GITHUB_REF_NAME"; exit 1; } ;;
-          esac
           # `mj new` opens the editor on /dev/tty, so give it one with script.
           export XDG_DATA_HOME="$RUNNER_TEMP/data" EDITOR=true
           if [ "$RUNNER_OS" = Linux ]; then
@@ -92,30 +103,37 @@ jobs:
 
   release:
     name: publish release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [emit, build]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v${{ needs.emit.outputs.version }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Check whether this version is released
+        id: check
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "$TAG is already released; bump version() to release"
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.check.outputs.new == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: mj-*
           path: dist
           merge-multiple: true
-      # install.sh downloads from the repo it was published by, so forks and
-      # renames need no edits.
-      - name: Fill in the repo in install.sh
-        run: |
-          sed "s|^REPO=\"\"|REPO=\"$GITHUB_REPOSITORY\"|" install.sh > dist/install.sh
-          grep -q "^REPO=\"$GITHUB_REPOSITORY\"" dist/install.sh
       - name: Checksums
+        if: steps.check.outputs.new == 'true'
         working-directory: dist
         run: sha256sum mj-*.tar.gz > checksums.txt
+      # Creates the tag on this commit too.
       - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes dist/*
+        if: steps.check.outputs.new == 'true'
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "$TAG" --generate-notes dist/*

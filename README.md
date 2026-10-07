@@ -3,7 +3,7 @@
 ## Installation
 
 ```sh
-curl -fsSL https://github.com/AH-Merii/my-journal/releases/latest/download/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/AH-Merii/my-journal/main/install.sh | sh
 ```
 
 Verify with:

@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# A new push to the PR cancels the build of the one before.
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     uses: ./.github/workflows/build.yml

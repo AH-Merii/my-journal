@@ -18,6 +18,12 @@ on:
 permissions:
   contents: read
 
+# A newer run for the PR replaces an older one, so an older preview can't be
+# posted last.
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   title:
     name: conventional title

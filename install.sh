@@ -116,6 +116,11 @@ main() {
 
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
+  # dash doesn't run the EXIT trap when a signal kills the script, but exiting
+  # from a signal trap does, so Ctrl-C still cleans up.
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   cd "$tmp"
   download "$url" "$file"
   verify "$file"

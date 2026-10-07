@@ -71,7 +71,10 @@ verify() { # file
   else
     fail "sha256sum or shasum is required to verify the download"
   fi
-  grep " $1\$" checksums.txt | $sha -c - >/dev/null 2>&1 \
+  # The line whose file name field is exactly $1.
+  line=$(awk -v f="$1" '$2 == f' checksums.txt)
+  [ -n "$line" ] || fail "checksums.txt has no line for $1"
+  echo "$line" | $sha -c - >/dev/null 2>&1 \
     || fail "$1 does not match its checksum"
 }
 

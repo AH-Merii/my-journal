@@ -44,7 +44,9 @@ jobs:
       # With no tag, semantic-release would make the first release 1.0.0.
       - name: Check there's a tag to count from
         run: |
-          git tag --merged HEAD --list 'v*' | grep -q . || {
+          # Release tags only, as semantic-release counts them: v1.2.3, not
+          # v1.2.3-rc.1 or vinit.
+          git tag --merged HEAD --list 'v*' | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(\+[0-9A-Za-z.-]+)?$' || {
             echo "::error::main has no v* tag; tag main's first commit v0.0.0 so the first release is 0.1.0, not 1.0.0"
             exit 1
           }

@@ -10,6 +10,13 @@ plugins:
     - preset: conventionalcommits
   - - "@semantic-release/release-notes-generator"
     - preset: conventionalcommits
+  # release.yml sets BUILT to the version the binaries were built with when
+  # publishing; this stops the release before tagging if semantic-release now
+  # wants another, e.g. because a tag was pushed during the build.
+  - - "@semantic-release/exec"
+    - verifyReleaseCmd: >-
+        test -z "$BUILT" || test "$BUILT" = "${nextRelease.version}"
+        || { echo "built v$BUILT, but the release is v${nextRelease.version}" >&2; exit 1; }
   # Publishes the GitHub release with what release.yml put in dist/.
   - - "@semantic-release/github"
     - assets: dist/*

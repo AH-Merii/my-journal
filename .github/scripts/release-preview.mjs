@@ -30,16 +30,18 @@ const bump = (messages) =>
     logger: { log() {} },
   });
 
-// semantic-release's last release: the highest v<version> tag on main.
+// semantic-release's last release: the highest v<version> tag on main. The
+// tag is kept as named, since build metadata such as +build.1 isn't part of
+// the parsed version.
 const last = execFileSync("git", ["tag", "--merged", "HEAD", "--list", "v*"], { encoding: "utf8" })
   .split("\n")
-  .map((tag) => semver.valid(tag.slice(1)))
-  .filter((version) => version && !semver.prerelease(version))
-  .sort(semver.rcompare)[0];
+  .map((tag) => ({ tag, version: semver.valid(tag.slice(1)) }))
+  .filter(({ version }) => version && !semver.prerelease(version))
+  .sort((a, b) => semver.rcompare(a.version, b.version))[0];
 
 // Commits on main since then, which the next release includes whatever this
 // PR brings.
-const range = last ? [`v${last}..HEAD`] : ["HEAD"];
+const range = last ? [`${last.tag}..HEAD`] : ["HEAD"];
 const unreleased = execFileSync("git", ["log", "--format=%B%x00", ...range], { encoding: "utf8" })
   .split("\0")
   .map((message) => message.trim())
@@ -48,7 +50,7 @@ const unreleased = execFileSync("git", ["log", "--format=%B%x00", ...range], { e
 const release = (type) => {
   if (!type) return "nothing";
   if (!last) return "nothing until `v0.0.0` is tagged";
-  return `**v${semver.inc(last, type)}**, a ${type} bump from v${last}`;
+  return `**v${semver.inc(last.version, type)}**, a ${type} bump from ${last.tag}`;
 };
 
 const prCommits = readFileSync(COMMITS, "utf8")

@@ -36,7 +36,7 @@ jobs:
       - run: shellcheck install.sh
       - name: Check install.sh downloads from this repo
         run: |
-          grep -qx "REPO=\"$GITHUB_REPOSITORY\"" install.sh || {
+          grep -qxF "REPO=\"$GITHUB_REPOSITORY\"" install.sh || {
             echo "::error file=install.sh::set REPO=\"$GITHUB_REPOSITORY\" in install.sh"
             exit 1
           }

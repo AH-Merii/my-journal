@@ -81,10 +81,19 @@ jobs:
           # `--` hands --version to mj rather than to bend.
           test "$(bend src/main.bend -- --version)" = "mj $VERSION"
       - run: bend src/main.bend -o mj.c
+      # mj contains Bend's runtime, and Bend's Apache-2.0 license must ship
+      # with it; this fetches it for the Bend version in use.
+      - name: Fetch Bend's license
+        run: |
+          v=$(bend version)
+          curl -fsSL -o LICENSE-bend "https://raw.githubusercontent.com/bendlang/bend/v${v#bend }/LICENSE"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mj.c
-          path: mj.c
+          name: build-inputs
+          path: |
+            mj.c
+            LICENSE
+            LICENSE-bend
           if-no-files-found: error
 
   build:
@@ -108,7 +117,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: mj.c
+          name: build-inputs
       # The flags `bend -o` passes to clang, plus CFLAGS.
       - name: Compile
         run: |
@@ -130,7 +139,7 @@ jobs:
           fi
           head -n 1 "$XDG_DATA_HOME"/my-journal/entries/*.md | grep '^# '
       - name: Package
-        run: tar -czf "mj-$TARGET.tar.gz" mj
+        run: tar -czf "mj-$TARGET.tar.gz" mj LICENSE LICENSE-bend
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mj-${{ matrix.target }}

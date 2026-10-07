@@ -51,7 +51,7 @@ jobs:
 
   publish:
     name: publish release
-    needs: build
+    needs: [version, build]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -71,10 +71,29 @@ jobs:
       - name: Checksums
         working-directory: dist
         run: sha256sum mj-*.tar.gz > checksums.txt
-      # Same commits and tags as the dry run, so the same version.
+      # Same commits and tags as the dry run, so the same version; the next
+      # step checks.
       - uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        id: publish
         with:
           semantic_version: 25.0.9
           extra_plugins: conventional-changelog-conventionalcommits@10.4.1
         env:
           GITHUB_TOKEN: ${{ github.token }}
+      # Empty: another merge moved main during the build, so semantic-release
+      # published nothing; the run for that merge releases these commits too.
+      # Different: a tag was pushed meanwhile, and the binaries say the wrong
+      # version.
+      - name: Check the release matches the build
+        env:
+          BUILT: ${{ needs.version.outputs.version }}
+          PUBLISHED: ${{ steps.publish.outputs.new_release_version }}
+        run: |
+          if [ -z "$PUBLISHED" ]; then
+            echo "::error::nothing was published: main moved during the build, and the next run releases v$BUILT's commits"
+            exit 1
+          fi
+          if [ "$PUBLISHED" != "$BUILT" ]; then
+            echo "::error::published v$PUBLISHED, but the binaries were built as v$BUILT"
+            exit 1
+          fi

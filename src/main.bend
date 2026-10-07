@@ -8,8 +8,9 @@ import Base
 # Help
 # ====
 
+# A release build writes its version here; see .github/workflows/build.yml.
 def version() -> String:
-  "0.1.0"
+  "0.0.0-dev"
 
 # The commands and the sentence describing each. mj's help lists them,
 # and a command without its own help inherits its sentence (see help.of).

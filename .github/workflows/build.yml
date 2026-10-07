@@ -1,0 +1,138 @@
+# Works out the next version, then builds and smoke-tests mj with it on every
+# platform, leaving one mj-<target>.tar.gz artifact per platform. Called by
+# ci.yml for pull requests and by release.yml for merges to main.
+#
+# Bend emits one portable C file, which each platform then compiles with
+# clang, so Bend is only installed once.
+name: build
+
+on:
+  workflow_call:
+    outputs:
+      bump:
+        description: major, minor, patch or none
+        value: ${{ jobs.version.outputs.bump }}
+      version:
+        description: the version built, without a leading v
+        value: ${{ jobs.version.outputs.version }}
+
+permissions:
+  contents: read
+
+env:
+  # Bend's update check writes ~/.bend; skip it.
+  BEND_NO_TELEMETRY: "1"
+
+jobs:
+  version:
+    name: next version
+    runs-on: ubuntu-24.04
+    outputs:
+      bump: ${{ steps.next.outputs.bump }}
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # All history and tags: the version comes from commits since the
+          # last v* tag.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Work out the next version
+        id: next
+        run: |
+          .github/scripts/next-version.sh 2> commits.txt >> "$GITHUB_OUTPUT"
+          cat commits.txt
+      - name: Summary
+        env:
+          BUMP: ${{ steps.next.outputs.bump }}
+          VERSION: ${{ steps.next.outputs.version }}
+        run: |
+          if [ "$BUMP" = none ]; then
+            echo "### No release: no commit asks for a version bump" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Releases v$VERSION ($BUMP)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          { echo '```'; cat commits.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  emit:
+    name: check and emit C
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Installs the Bend version pinned in mise.toml.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      - run: bend src/main.bend --check-only
+      - run: shellcheck install.sh .github/scripts/*.sh
+      - name: Check install.sh downloads from this repo
+        run: |
+          grep -qx "REPO=\"$GITHUB_REPOSITORY\"" install.sh || {
+            echo "::error file=install.sh::set REPO=\"$GITHUB_REPOSITORY\" in install.sh"
+            exit 1
+          }
+      # Only in this checkout; the version is never committed.
+      - name: Write the version into version()
+        run: |
+          sed -i "/^def version() -> String:\$/{n;s/\"[^\"]*\"/\"$VERSION\"/}" src/main.bend
+          # `--` hands --version to mj rather than to bend.
+          test "$(bend src/main.bend -- --version)" = "mj $VERSION"
+      - run: bend src/main.bend -o mj.c
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mj.c
+          path: mj.c
+          if-no-files-found: error
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: [version, emit]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # -static: the binary then runs on any distro, whatever its libc.
+          - { target: linux-x64, runner: ubuntu-24.04, cflags: -static }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm, cflags: -static }
+          - { target: darwin-x64, runner: macos-15-intel, cflags: "" }
+          - { target: darwin-arm64, runner: macos-15, cflags: "" }
+    runs-on: ${{ matrix.runner }}
+    env:
+      CFLAGS: ${{ matrix.cflags }}
+      TARGET: ${{ matrix.target }}
+      VERSION: ${{ needs.version.outputs.version }}
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mj.c
+      # The flags `bend -o` passes to clang, plus CFLAGS.
+      - name: Compile
+        run: |
+          # shellcheck disable=SC2086 # CFLAGS is empty or one flag
+          clang -std=c11 -O3 $CFLAGS mj.c -lpthread -lm -o mj
+          strip mj
+      - name: Smoke test
+        run: |
+          ./mj -h >/dev/null
+          test "$(./mj -v)" = "mj $VERSION"
+          status=0; ./mj bogus 2>/dev/null || status=$?
+          test "$status" -eq 2
+          # `mj new` opens the editor on /dev/tty, so give it one with script.
+          export XDG_DATA_HOME="$RUNNER_TEMP/data" EDITOR=true
+          if [ "$RUNNER_OS" = Linux ]; then
+            script -qec "./mj new" /dev/null
+          else
+            script -q /dev/null ./mj new
+          fi
+          head -n 1 "$XDG_DATA_HOME"/my-journal/entries/*.md | grep '^# '
+      - name: Package
+        run: tar -czf "mj-$TARGET.tar.gz" mj
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mj-${{ matrix.target }}
+          path: mj-${{ matrix.target }}.tar.gz
+          if-no-files-found: error

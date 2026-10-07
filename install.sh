@@ -28,10 +28,17 @@ detect_os() {
 
 # x64 or arm64, as named in the release files.
 detect_arch() {
-  case "$(uname -m)" in
+  arch=$(uname -m)
+  # A shell running under Rosetta on an Apple Silicon Mac sees x86_64, but the
+  # arm64 binary runs there natively.
+  if [ "$arch" = x86_64 ] && [ "$(uname -s)" = Darwin ] &&
+    [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
+    arch=arm64
+  fi
+  case "$arch" in
     x86_64 | amd64) echo x64 ;;
     aarch64 | arm64) echo arm64 ;;
-    *) fail "no prebuilt binary for $(uname -m)" ;;
+    *) fail "no prebuilt binary for $arch" ;;
   esac
 }
 
